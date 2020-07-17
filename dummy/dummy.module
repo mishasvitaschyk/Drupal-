@@ -1,0 +1,74 @@
+<?php
+
+use Drupal\Core\Url;
+use Symfony\Component\HttpFoundation\RedirectResponse;
+
+function dummy_node_presave(Drupal\Core\Entity\EntityInterface $entity)
+{
+
+  if($entity->bundle() === "review") {
+
+    $show_message = TRUE;
+    $uid = $entity->get("uid")->target_id;
+    $current_is_owner = Drupal::currentUser()->id() === $uid;
+    $store_referenced_id = $entity->get('field_shop')->target_id;
+    $mail_service = Drupal::service('plugin.manager.mail');
+
+    $query_get_id_store = Drupal::database()->select('commerce_store_field_data', 'csfd');
+    $query_get_id_store->condition('csfd.store_id', $store_referenced_id);
+    $query_get_id_store->addField('csfd', 'uid');
+    $owner_store = $query_get_id_store->execute()->fetchField();
+
+    if ($owner_store === $uid) {
+      $entity->status->setValue(0);
+      $show_message = FALSE;
+      Drupal::messenger()->addError("Sorry, but you can't add your company for review");
+    }
+
+    if($show_message && $entity->isNew()) {
+      Drupal::messenger()->addMessage("Thank you for your feedback");
+      $mail_service->mail('mod', 'changes_review', "michasvitachyk@gmail.com", 'en', array(), null, true);
+      $response = new RedirectResponse("/store/{$store_referenced_id}");
+      $response->send();
+    }
+
+    if($show_message && !$entity->isNew() && $current_is_owner) {
+      $user = \Drupal\user\Entity\User::load($uid);
+      $mail = $user->get('mail')->value;
+      $mail_service->mail('mod', 'changes_review', $mail, 'en', array(), null, true);
+    }
+  }
+
+  function dummy_node_delete(Drupal\Core\Entity\EntityInterface $entity)
+  {
+
+    if($entity->bundle() === "review") {
+      $uid = $entity->get('uid')->target_id;
+      $current_is_owner = Drupal::currentUser()->id() === $uid;
+
+      if (!$current_is_owner) {
+        $user = \Drupal\user\Entity\User::load((int)$uid);
+        $mail = $user->get('mail')->value;
+        $mail_service = Drupal::service('plugin.manager.mail');
+        $mail_service->mail('mod', 'delete_review', $mail, 'en', array(), null, true);
+      }
+    }
+  }
+}
+
+function dummy_form_node_review_form_alter(&$form, \Drupal\Core\Form\FormStateInterface $form_state, $form_id)
+{
+  $form['actions']['submit']['#submit'][] = 'rules_hooks_form_review_form_submit';
+}
+
+function dummy_form_review_form_submit($form, &$form_state)
+{
+
+  if(count($_SESSION['_symfony_flashes']['status']) > 1) {
+    array_pop($_SESSION['_symfony_flashes']['status']);
+  }
+  else {
+    unset($_SESSION['_symfony_flashes']['status']);
+  }
+
+}
